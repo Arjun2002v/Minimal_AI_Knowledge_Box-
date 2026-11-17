@@ -1,0 +1,1 @@
+-- Tables: items (raw content + metadata), chunks (text, position, embedding BLOB).
