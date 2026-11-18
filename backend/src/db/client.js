@@ -13,3 +13,16 @@ export const openDb = (path) => {
   db.exec(readFileSync(schemaPath, 'utf8'));
   return db;
 };
+
+/** Runs fn inside a transaction: all of its writes are saved, or none are. */
+export const inTransaction = (db, fn) => {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+};

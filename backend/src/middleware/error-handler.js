@@ -10,7 +10,8 @@ export const notFoundHandler = (req, _res, next) => {
 // Express recognizes an error handler by its four arguments, so `_next` must stay.
 export const errorHandler = (err, _req, res, _next) => {
   if (err instanceof AppError) {
-    if (err.status >= 500) logger.warn({ err }, err.message);
+    // For upstream failures, log the original provider error; the client only gets the clean message.
+    if (err.status >= 500) logger.warn({ err, cause: err.cause }, err.message);
     res.status(err.status).json({ error: { code: err.code, message: err.message, details: err.details } });
     return;
   }

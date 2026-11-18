@@ -5,7 +5,6 @@ import { z } from 'zod';
 const EnvSchema = z
   .object({
     GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required (get one at https://aistudio.google.com/apikey)'),
-    LLM_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com/v1beta/openai/'),
     CHAT_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
     EMBEDDING_MODEL: z.string().min(1).default('gemini-embedding-001'),
     EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),

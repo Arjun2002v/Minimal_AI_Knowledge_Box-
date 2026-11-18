@@ -33,3 +33,6 @@ export const fetcher = (path) => request(path);
 
 /** input is { type: 'note', content, title? } or { type: 'url', url } */
 export const ingest = (input) => request('/ingest', { method: 'POST', body: JSON.stringify(input) });
+
+/** @returns {Promise<{ answer: string, sources: Array<{ n, itemId, title, url, type, snippet, score }> }>} */
+export const askQuestion = (question) => request('/query', { method: 'POST', body: JSON.stringify({ question }) });

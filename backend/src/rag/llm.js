@@ -1,21 +1,25 @@
-// Chat completion wrapper for answer generation (Gemini via OpenAI-compatible API).
-import { env } from '../config/env.js';
-import { llmClient } from './client.js';
+// Answer generation: prompt -> Gemini chat model -> plain string, as a LangChain chain.
+import { StringOutputParser } from '@langchain/core/output_parsers';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { toUpstreamError } from './ai-errors.js';
+import { answerPrompt } from './prompt.js';
+
+const TIMEOUT_MS = 45_000;
 
 /**
- * Returns the model's text answer for the given messages.
- * @param {{ role: 'system' | 'user' | 'assistant', content: string }[]} messages
- * @returns {Promise<string>}
+ * @param {{ apiKey: string, model: string }} options
+ * @returns {(input: { question: string, context: string }) => Promise<string>}
  */
-export const generateAnswer = async (messages) => {
-  const res = await llmClient.chat.completions.create({
-    model: env.CHAT_MODEL,
-    messages,
-    temperature: 0.2,
-  });
-  const content = res.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error(`LLM returned no content (finish_reason: ${res.choices[0]?.finish_reason ?? 'unknown'})`);
-  }
-  return content;
+export const createAnswerGenerator = ({ apiKey, model }) => {
+  const chatModel = new ChatGoogleGenerativeAI({ apiKey, model, temperature: 0.2, maxRetries: 2 });
+  const chain = answerPrompt.pipe(chatModel).pipe(new StringOutputParser());
+
+  return async ({ question, context }) => {
+    try {
+      const answer = await chain.invoke({ question, context }, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+      return answer.trim();
+    } catch (err) {
+      throw toUpstreamError(err, 'Generating the answer');
+    }
+  };
 };

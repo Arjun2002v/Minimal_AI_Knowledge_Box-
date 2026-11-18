@@ -1,24 +1,37 @@
 # Knowledge Box
 
-A small personal knowledge inbox. You save notes and web links, and (in the next step) ask questions about them and get answers that cite where they came from.
+A small personal knowledge inbox. You save notes and web links, then ask questions about them. The answers use only what you've saved, and each claim links to the passage it came from.
 
-Right now the save-and-list part is done end to end. The question-answering (RAG) part is the next piece of work. The Gemini client for it is already set up.
+It's a basic RAG setup:
+- **Saving:** content is split into chunks, the chunks are embedded with Gemini, and the vectors are stored in SQLite.
+- **Asking:** the question is embedded, the closest chunks are found, and Gemini writes an answer from only those chunks, citing them as `[1]`, `[2]`, and so on.
+
+The tradeoffs (chunking, vector store, what breaks at scale, production changes) are written up in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Stack
 
-- **Backend:** Node 22 and Express 5 in plain JavaScript (ES modules, with no build step), SQLite through Node's built-in `node:sqlite`, Zod for validation, pino for logs
-- **Frontend:** React 19 and Vite in plain JavaScript (JSX), SWR for data fetching and caching, with plain CSS
-- **AI (next step):** Google Gemini through its OpenAI-compatible endpoint (`gemini-3.5-flash-lite` for answers, `gemini-embedding-001` for embeddings)
+- **Backend:**
+  - Node 22 and Express 5 in plain JavaScript (ES modules, no build step)
+  - SQLite through Node's built-in `node:sqlite`
+  - Zod for validation, pino for logs
+- **RAG:** LangChain JS
+  - `@langchain/textsplitters` splits the text into chunks
+  - `@langchain/google-genai` provides the Gemini embeddings and chat model
+  - `@langchain/core` provides the prompt template and the chain
+- **Models:**
+  - `gemini-embedding-001` for embeddings, at 768 dimensions
+  - `gemini-3.5-flash-lite` for answers
+- **Frontend:** React 19 and Vite in plain JavaScript (JSX), SWR for data fetching and caching, plain CSS
 
 ## Running it
 
-You need Node 22.5 or newer. The SQLite module is built into Node, so nothing has to compile.
+You need **Node 22.5 or newer** and a **Gemini API key**. The free one from https://aistudio.google.com/apikey works.
 
 ```bash
 # backend
 cd backend
 npm install
-cp .env.example .env      # then put your Gemini key in .env
+cp .env.example .env      # then set GEMINI_API_KEY in .env
 npm run dev               # http://localhost:4000/api
 
 # frontend, in a second terminal
@@ -27,87 +40,130 @@ npm install
 npm run dev               # http://localhost:5173
 ```
 
-The Vite dev server proxies `/api` to the backend, so the browser only talks to one origin and there's no CORS setup.
+**Notes:**
+- **Nothing to compile.** The SQLite module is built into Node. It's still marked experimental in Node 22, so the npm scripts pass `--experimental-sqlite`.
+- **No CORS setup.** The Vite dev server forwards `/api` to the backend, so the browser only talks to one origin.
 
-Tests (backend):
+All settings live in `backend/.env`; see [.env.example](backend/.env.example). The ones you're most likely to change:
+- **`CHAT_MODEL`:** if the default model is overloaded, try another Gemini Flash model.
+- **`CHUNK_SIZE`, `CHUNK_OVERLAP` and `TOP_K`:** chunking and retrieval settings.
+- **`EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`:** if you change either, delete `backend/data/inbox.db` and save your items again. Vectors from different models can't be compared.
+
+### Tests
 
 ```bash
 cd backend
 npm test
 ```
 
-They use an in-memory database and a fake URL fetcher, so they don't need the network or an API key.
+There are 36 tests, using Node's built-in test runner:
+- **API tests:** validation, status codes, ingestion, querying and citations.
+- **Unit tests:** the chunker, the vector helpers and the prompt helpers.
+
+They use an in-memory database and a fake embedder, fetcher and model (`tests/helpers.js`), so they don't need the network or an API key.
 
 ## API
 
 All routes are under `/api`.
 
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/ingest` | Save a note `{ "type": "note", "content": "...", "title"?: "..." }` or a link `{ "type": "url", "url": "https://..." }`. Returns `201` and the saved item. |
-| `GET` | `/items` | List saved items, newest first. Each one has a 200-character preview, not the full text. |
-| `GET` | `/health` | Liveness check. |
+| Method | Path | Body | Response |
+|---|---|---|---|
+| `POST` | `/ingest` | `{ "type": "note", "content": "...", "title"?: "..." }` or `{ "type": "url", "url": "https://..." }` | `201` `{ item }` (includes `chunkCount`) |
+| `GET` | `/items` | | `200` `{ items }`, newest first, each with a 200-character `preview` |
+| `POST` | `/query` | `{ "question": "...", "topK"?: 1-20 }` | `200` `{ answer, sources }` |
+| `GET` | `/health` | | `200` `{ status: "ok" }` |
 
-Every error has the same shape, so the frontend only needs one way to handle errors:
+Example `/query` response:
+
+```json
+{
+  "answer": "The Q3 offsite is in Lisbon, and the budget is 900 EUR per person, hotel included [1].",
+  "sources": [
+    {
+      "n": 1,
+      "itemId": "e2f8707c-…",
+      "title": "Team offsite",
+      "url": null,
+      "type": "note",
+      "snippet": "The Q3 offsite is in Lisbon from 14 to 16 October. …",
+      "score": 0.789
+    }
+  ]
+}
+```
+
+What the fields mean:
+- **`sources`** lists only the chunks the answer actually cites.
+- **`n`** matches the `[n]` marker in the answer.
+- **`score`** is the cosine similarity between the question and that chunk.
+
+If nothing relevant is saved, the answer says so and `sources` is empty.
+
+### Errors
+
+Every error has the same shape:
 
 ```json
 { "error": { "code": "VALIDATION_ERROR", "message": "Invalid request body", "details": [{ "field": "url", "message": "Must be a valid URL" }] } }
 ```
 
-| Status | When |
-|---|---|
-| 400 | Invalid body or malformed JSON |
-| 404 | Unknown route |
-| 413 | Body over 256 KB |
-| 422 | The URL was fine, but the page couldn't be used (404, not HTML, no text, too big, private address) |
-| 502 | The remote site timed out or the connection failed |
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR`, `INVALID_JSON` | Invalid body or malformed JSON |
+| 404 | `NOT_FOUND` | Unknown route |
+| 413 | `PAYLOAD_TOO_LARGE` | Body over 256 KB |
+| 422 | `UNPROCESSABLE` | The URL was fine, but the page couldn't be used (HTTP error, not HTML, no text, over 2 MB, private address) |
+| 502 | `UPSTREAM_ERROR` | The remote site timed out or failed, or Gemini failed (rate limit, overload, bad key). The message says which. |
+| 500 | `INTERNAL_ERROR` | A bug. The details go to the log, not to the client. |
 
 ## How it's put together
 
 ```
 backend/src
-  routes/      HTTP only: parse the request, call a service, send the response
-  services/    the actual steps (fetch the page, build the item, save it)
-  db/          SQL lives here and nowhere else
+  routes/      HTTP only: validate, call a service, send the response
+  services/    ingestion (fetch → chunk → embed → save), items, rag (embed → search → prompt → answer)
+  db/          SQLite connection, schema, and the only place with SQL (items + chunks repositories)
+  rag/         chunker, embeddings, retriever, prompt, llm (LangChain + Gemini), vector helpers
   fetchers/    downloads a URL and extracts its readable text
   middleware/  validation, request logging, error → JSON mapping
-  rag/         Gemini client, embeddings, chat (wired up in the next step)
+  config/      reads and validates .env
 
 frontend/src
-  api/         a fetch wrapper that turns error responses into an ApiError
-  hooks/       useItems (useSWR) and useIngest (useSWRMutation)
-  components/  IngestForm, ItemList, ErrorBanner
+  api/         fetch wrapper; turns error responses into an ApiError
+  hooks/       useItems (useSWR), useIngest and useAsk (useSWRMutation)
+  components/  IngestForm, ItemList, AskPanel, AnswerView, SourceSnippet, ErrorBanner
 ```
 
-`createApp()` takes its dependencies (the database and the URL fetcher) as arguments and doesn't start listening. That's what lets the tests create an app with an in-memory database.
+`createApp()` receives everything from outside as arguments: the database, the URL fetcher, the chunker, the embedder and the answer generator. `server.js` passes in the real ones and the tests pass in fakes. Nothing else in the app knows which one it got.
 
-On the frontend, the items list is cached by SWR under the `/items` key. After a save, `useSWRMutation` puts the new item at the top of that cached list itself (`populateCache`), so the list updates without fetching everything again. SWR also refetches when you come back to the tab, and it retries network and server errors but not 4xx responses.
+On the frontend, SWR caches the items list under the `/items` key. After a save, `useSWRMutation` puts the new item at the top of that cached list itself, so there's no refetch. SWR also refetches when you come back to the tab, and it retries network and server errors but not 4xx responses.
 
 ## Decisions worth explaining
 
-**SQLite instead of Postgres or a vector database.** For a single-user tool it's one file, needs no setup, and is fast enough. I started with `better-sqlite3`, but its native binary crashed on my Windows machine, so I switched to `node:sqlite`. It needs no build step, so anyone can clone the project and run it. The tradeoff is that it's still experimental in Node 22, which is why the npm scripts pass `--experimental-sqlite`.
+These are the decisions not covered in ARCHITECTURE.md.
 
-**Fetching URLs on the server.** The browser can't read most pages because of CORS, and the RAG step needs the text on the server anyway. Because the server is fetching user-supplied URLs, I added some guards:
-- a 10-second timeout and a 2 MB size cap
+**Gemini through LangChain.** The brief asks for OpenAI or an equivalent. Gemini has a free tier, which is easier for a reviewer to run.
+
+I tried calling Gemini through its OpenAI-compatible endpoint first. I switched to LangChain's native Gemini integration because it supports separate task types for documents and questions, which improves retrieval.
+
+LangChain has one catch: when a batch embedding request fails, `embedDocuments` doesn't throw. It returns empty vectors instead. `rag/embeddings.js` checks every vector, retries twice, and then returns a clear 502. Before that check, a rate-limited save caused a confusing 500 from SQLite.
+
+**Fetching URLs on the server.** The browser can't read most pages because of CORS, and the text has to be on the server to be embedded anyway. The fetcher has these guards:
+- a 10-second timeout and a 2 MB cap
 - only HTML or plain text is accepted
 - addresses that resolve to localhost or private networks are rejected, and this is re-checked on every redirect (redirects are followed manually)
 
-Text extraction is simple. It removes scripts, nav, header, footer and similar parts, and prefers `<article>` or `<main>` when the page has one. It works fine on blogs and docs, but less well on pages that build their content with JavaScript.
+Text extraction removes scripts, nav, header, footer and similar parts, and prefers `<article>` or `<main>` when the page has one.
+
+**Answers must cite, and citations are checked.** The prompt numbers the context blocks and asks for `[n]` after every claim. The server keeps only citations that point at blocks that really exist. The UI turns them into links that jump to the source snippet.
 
 **Notes get a title automatically.** If you don't give one, the title is the first line of the note, cut at a word boundary.
 
-**Previews are cut in SQL.** `GET /items` uses `substr()`, so a long article's full text never leaves the database just to show a list.
-
-## What's next
-
-1. **Chunking.** Split each item into overlapping chunks along paragraph and sentence boundaries.
-2. **Embeddings.** Embed the chunks with Gemini and store the vectors as BLOBs next to the chunks.
-3. **`POST /query`.** Embed the question, find the closest chunks by cosine similarity, send them to Gemini as numbered context, and return the answer with `[n]` citations mapped back to their source items.
-4. **The Ask panel** in the UI, showing the answer and the source snippets.
-
 ## Known limitations
 
-- No auth, and it's single user.
-- No deleting or editing items yet.
-- Saving the same URL twice creates two items.
-- Pages that need JavaScript to show their content come out mostly empty.
+- **Single user.** There's no auth.
+- **Items can't be edited or deleted** from the UI or the API.
+- **Duplicates aren't detected.** Saving the same URL twice creates two items.
+- **JavaScript-heavy pages don't work.** Pages that need JavaScript to show their content come out mostly empty.
+- **Saving can be slow.** It waits for the page download and for Gemini embeddings inside the request, and the free tier's rate limits can make it fail with a 502.
+- **Don't save anything sensitive on a free key.** On Gemini's free tier, Google may use what you send to improve its products.

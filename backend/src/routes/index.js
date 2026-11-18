@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { ingestRoutes } from './ingest.routes.js';
 import { itemsRoutes } from './items.routes.js';
+import { queryRoutes } from './query.routes.js';
 
 export const apiRoutes = (services) => {
   const router = Router();
@@ -10,6 +11,6 @@ export const apiRoutes = (services) => {
   });
   router.use(ingestRoutes(services.ingestion));
   router.use(itemsRoutes(services.items));
-  // Next step: router.use(queryRoutes(services.rag));
+  router.use(queryRoutes(services.rag));
   return router;
 };

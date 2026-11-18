@@ -126,6 +126,46 @@ button.secondary { align-self: flex-start; background: transparent; color: var(-
   overflow: hidden;
 }
 
+.column { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+@media (min-width: 761px) { .column:last-child { position: sticky; top: 20px; } }
+
+.ask-form { display: flex; gap: 8px; }
+.ask-form input { flex: 1; }
+
+.answer-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.citation { margin-left: 2px; }
+.citation a {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-right: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+.sources-heading { margin: 18px 0 8px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.source-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.source { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; scroll-margin-top: 20px; }
+.source:target { outline: 2px solid var(--accent); }
+.source-header { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; min-width: 0; }
+.source-number { font-weight: 700; color: var(--accent); }
+.source-title { font-weight: 600; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.source-score { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.source-snippet {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .badge { font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
 .badge-note { color: var(--note); background: var(--note-bg); }
 .badge-url { color: var(--link); background: var(--link-bg); }
