@@ -1,6 +1,3 @@
-// Embedding provider wrapper (Gemini through LangChain).
-// Documents and questions use different Gemini task types, which improves retrieval.
-// Vectors come back L2-normalized as Float32Array.
 import { setTimeout as sleep } from 'node:timers/promises';
 import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 import { UpstreamError } from '../lib/errors.js';
@@ -9,10 +6,6 @@ import { normalize } from './vectors.js';
 
 const MAX_ATTEMPTS = 3;
 
-/**
- * @param {{ apiKey: string, model: string, dimensions: number }} options
- * @returns {{ embedDocuments: (texts: string[]) => Promise<Float32Array[]>, embedQuery: (text: string) => Promise<Float32Array> }}
- */
 export const createEmbedder = ({ apiKey, model, dimensions }) => {
   const make = (taskType) =>
     new GoogleGenerativeAIEmbeddings({ apiKey, model, taskType, outputDimensionality: dimensions, maxRetries: 2 });
@@ -23,8 +16,7 @@ export const createEmbedder = ({ apiKey, model, dimensions }) => {
   const isComplete = (vectors, expectedCount) =>
     vectors.length === expectedCount && vectors.every((v) => v.length === dimensions);
 
-  // LangChain's embedDocuments does NOT throw when a batch request fails: it returns
-  // empty vectors for that batch instead. So we check the result and retry ourselves.
+  // LangChain returns empty vectors instead of throwing when a batch fails, so check and retry.
   const embedDocuments = async (texts) => {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       let vectors;

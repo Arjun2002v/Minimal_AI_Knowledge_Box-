@@ -1,4 +1,3 @@
-// Submits a question; holds answer, sources, loading/error (useSWRMutation, no caching of answers).
 import useSWRMutation from 'swr/mutation';
 import { askQuestion } from '../api/client';
 
@@ -9,7 +8,7 @@ export const useAsk = () => {
 
   return {
     ask: (question) => trigger(question),
-    result: data, // { answer, sources } from the last successful question
+    result: data,
     pending: isMutating,
     error,
     reset,

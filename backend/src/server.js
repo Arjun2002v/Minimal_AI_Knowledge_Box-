@@ -1,4 +1,3 @@
-// Entry point: loads config, opens DB, wires the real dependencies, starts the HTTP server.
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { openDb } from './db/client.js';

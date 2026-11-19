@@ -1,4 +1,3 @@
-// Mounts all route modules.
 import { Router } from 'express';
 import { ingestRoutes } from './ingest.routes.js';
 import { itemsRoutes } from './items.routes.js';

@@ -1,4 +1,3 @@
-// Request schema for /query: { question, topK? }.
 import { z } from 'zod';
 
 export const querySchema = z.object({

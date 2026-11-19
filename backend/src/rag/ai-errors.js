@@ -1,4 +1,3 @@
-// Turns errors from the AI provider into an UpstreamError (502) with a readable message.
 import { UpstreamError } from '../lib/errors.js';
 
 export const toUpstreamError = (err, action) => {
@@ -12,6 +11,6 @@ export const toUpstreamError = (err, action) => {
   else if (status === 400 || status === 401 || status === 403 || /API key/i.test(text)) reason = 'the AI provider rejected the request (check GEMINI_API_KEY and model names)';
 
   const upstream = new UpstreamError(`${action} failed: ${reason}`);
-  upstream.cause = err; // logged by the error handler, never sent to the client
+  upstream.cause = err;
   return upstream;
 };

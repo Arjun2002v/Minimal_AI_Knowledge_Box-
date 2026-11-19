@@ -1,5 +1,3 @@
-// HTTP-level tests for validation and status codes.
-// Uses an in-memory DB and fake fetcher / AI (see helpers.js), so no network or API key is needed.
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import request from 'supertest';
@@ -124,7 +122,6 @@ describe('POST /api/query', () => {
     assert.equal(res.body.sources[0].title, 'Postgres');
     assert.match(res.body.sources[0].snippet, /VACUUM/);
 
-    // The prompt got numbered context blocks, best match first.
     assert.match(calls.answer[0].context, /^\[1\] Postgres\n/);
   });
 

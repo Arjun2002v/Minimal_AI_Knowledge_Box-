@@ -1,4 +1,3 @@
-// One structured log line per request (request id, method, path, status, duration).
 import { randomUUID } from 'node:crypto';
 import { logger } from '../lib/logger.js';
 

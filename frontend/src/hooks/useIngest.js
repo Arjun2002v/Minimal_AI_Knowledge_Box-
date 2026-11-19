@@ -1,5 +1,3 @@
-// Saves a note or URL with useSWRMutation. On success the new item is added
-// to the cached '/items' list directly, so the list updates without a refetch.
 import useSWRMutation from 'swr/mutation';
 import { ingest } from '../api/client';
 import { ITEMS_KEY } from './useItems';
@@ -13,7 +11,6 @@ export const useIngest = () => {
     throwOnError: false,
   });
 
-  /** Returns true if the item was saved. */
   const submit = async (input) => Boolean(await trigger(input));
 
   return { submit, pending: isMutating, error, clearError: reset };

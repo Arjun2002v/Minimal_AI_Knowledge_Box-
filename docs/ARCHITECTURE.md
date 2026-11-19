@@ -1,111 +1,106 @@
-# Architecture & Tradeoffs
+# How It Works and Why
 
-## How a request flows
+## What happens on each request
 
-**Saving (`POST /api/ingest`)**
+### Saving something (`POST /api/ingest`)
 
-1. Zod validates the body. A bad body stops here with a 400.
-2. For a URL, the server downloads the page and pulls out the readable text (`fetchers/url-fetcher.js`).
-3. The text is split into chunks (`rag/chunker.js`).
-4. All the chunks are embedded with Gemini in one batched call (`rag/embeddings.js`).
-5. The item and its chunks are written in one SQLite transaction.
+1. The request is checked. If something's wrong, the app replies with a 400 and stops.
+2. If it's a link, the server downloads the page and pulls out the readable text (`fetchers/url-fetcher.js`).
+3. The text is cut into pieces called chunks (`rag/chunker.js`).
+4. Each chunk, together with the item's title, is sent to Gemini in one batch and turned into numbers (`rag/embeddings.js`).
+5. The item and its chunks are saved to SQLite in one step.
 
-Embedding happens before anything is written. If Gemini fails, nothing is saved, so an item can't exist without its chunks.
+Gemini is called before anything is saved. If Gemini fails, nothing is saved, so you never end up with half an item.
 
-**Asking (`POST /api/query`)**
+### Asking a question (`POST /api/query`)
 
-1. The question is embedded.
-2. Every stored chunk is scored against it (`rag/retriever.js`), and the top K (default 5) are kept.
-3. Those chunks become numbered context blocks, `[1] Title (url)\n text…` (`rag/prompt.js`).
-4. A LangChain chain (prompt → Gemini → string) writes the answer (`rag/llm.js`).
-5. The `[n]` markers in the answer are matched back to the blocks. Only blocks the model actually cited come back as `sources`.
+1. The question is turned into numbers.
+2. Every saved chunk is compared with the question, and the 5 closest are kept (`rag/retriever.js`).
+3. Those chunks are numbered and put into the prompt as `[1] Title`, then the text (`rag/prompt.js`).
+4. Gemini writes the answer (`rag/llm.js`).
+5. The app reads the `[1]`, `[2]` numbers in the answer and sends back only the chunks that were actually used.
 
-If the box is empty, the API says so and never calls Gemini.
+If nothing has been saved yet, the app says so and doesn't call Gemini.
 
-## Chunking approach
+## How text is split
 
 I use LangChain's `RecursiveCharacterTextSplitter`:
-- **Size:** 800 characters per chunk, with a 150-character overlap.
-- **Separators, tried in order:** paragraph (`\n\n`), line, sentence end (`. `, `? `, `! `), space, and finally single characters.
+- Chunks are about 800 characters long.
+- Each chunk repeats the last 150 characters of the previous one.
+- It tries to split at paragraphs first, then lines, then sentences, then spaces. It only cuts in the middle of a word if the text has no spaces at all.
 
-The splitter only falls back to a smaller separator for a piece that's still too long. So most chunks end at a paragraph or sentence boundary, and a hard cut mid-word only happens when the text has no spaces at all.
+**Why 800 characters.** That's usually one idea, about a paragraph. Small enough that search matches the question to something specific, big enough to keep some context. Five of them per question is about 4,000 characters, which is cheap and gives Gemini little to get confused by.
 
-**Why around 800 characters (roughly 150–200 tokens).** A chunk that size usually holds a single idea, so the question's embedding gets compared with something focused rather than a whole page's average. It's still big enough to carry the surrounding context. With top-5 retrieval, that's about 4,000 characters of context per question, which is cheap and leaves the model little irrelevant text to get distracted by.
+**Why the 150-character overlap.** If a fact sits right where two chunks meet, it still appears whole in one of them. It costs about 20% more chunks.
 
-**Why 150 characters of overlap.** A fact that sits across a chunk boundary still shows up whole in at least one chunk. The cost is about 20% more chunks to embed and store.
+**Why count characters and not tokens.** It's simpler and needs no extra library. Gemini accepts much longer text than 800 characters, so there's no risk of going over its limit.
 
-**Why characters and not tokens.** Counting characters needs no tokenizer dependency and is easy to reason about. The embedding model accepts far more than 800 characters, so there's no risk of going over its input limit.
+**Questions and saved text are embedded differently.** Gemini has one mode for saved text and another for questions. They're made to match each other, which usually finds better results than using the same mode for both.
 
-**Different task types for documents and questions.** Chunks are embedded with Gemini's `RETRIEVAL_DOCUMENT` task type and questions with `RETRIEVAL_QUERY`. Gemini trains these two to match each other, which usually beats embedding both the same way.
+**Weak spots:**
+- A chunk from the middle of a long article doesn't know which heading it was under. It only knows the page title.
+- The split doesn't follow topics. That would need an extra Gemini call per item.
+- LangChain sometimes puts a full stop at the start of the next chunk, like `". Next sentence"`. The app removes it, so the earlier chunk loses its full stop. This doesn't affect search.
 
-**Known weaknesses:**
-- **Section headings aren't carried along.** A chunk from the middle of a long article doesn't know which heading it was under.
-- **No semantic chunking.** Splitting by topic would cost an extra model call per document.
-- **A small quirk from LangChain.** The splitter attaches the sentence separator to the start of the next chunk, giving chunks like `". Next sentence"`. The wrapper strips that leading punctuation, which means the previous chunk ends without its full stop. That's harmless for retrieval.
+## Where the numbers are stored
 
-## Vector store choice
+The numbers live in SQLite next to everything else, and search is done in plain JavaScript. There's no separate vector database.
 
-I store vectors in SQLite and search them in plain JavaScript. There's no vector database.
-
-**How the vectors are stored:**
-- Each chunk row holds its embedding as a `BLOB` of raw `Float32` values.
-- Each vector has 768 dimensions, about 3 KB per chunk.
-- Vectors are scaled to length 1 when they're written, so cosine similarity is just a dot product.
-- A search loads every chunk, scores it and keeps the best K.
+- Each chunk row stores its 768 numbers as raw bytes, about 3 KB per chunk.
+- The numbers are scaled when saved so that comparing two chunks is a simple multiplication and sum.
+- Each search loads every chunk, scores it, and keeps the best 5.
 
 **Why:**
-- **One file, no extra service.** The reviewer runs `npm install` and `npm run dev`, and nothing else.
-- **Vectors live next to the data they belong to.** An item and its chunks are saved in one transaction, and deleting an item removes its chunks (`ON DELETE CASCADE`). With a separate vector store, those two could get out of sync.
-- **Brute force is accurate and fast enough at this size.** It always finds the true nearest chunks, unlike approximate indexes, and there's nothing to tune.
-- **768 dimensions instead of the default 3072.** `gemini-embedding-001` is trained so a shortened vector keeps most of its quality (Matryoshka representation learning). The shorter vectors take a quarter of the storage, and search is four times faster.
+- **One file, nothing else to run.** You run `npm install` and `npm run dev`, and that's it.
+- **Items and their numbers can't get out of sync.** They're saved together, and deleting an item deletes its chunks.
+- **Checking every chunk is exact and fast enough here.** It always finds the real best matches, and there's nothing to tune.
+- **768 numbers instead of 3,072.** Gemini's embedding model is built so a shorter list keeps most of its quality. It takes a quarter of the space and searches four times faster.
 
-I measured search on my machine with random 768-dimension vectors (top 5):
+Search speed on my machine (best 5 out of N chunks):
 
-| Chunks | Search time | Node heap |
+| Chunks | Search time | Memory |
 |---|---|---|
 | 1,000 | ~9 ms | ~13 MB |
 | 10,000 | ~100 ms | ~29 MB |
 | 50,000 | ~780 ms | ~109 MB |
 
-A personal inbox of a few hundred saved pages is a few thousand chunks, so search takes well under 50 ms. The Gemini call (1–3 s) is what the user actually waits for.
+A personal collection of a few hundred pages is a few thousand chunks, so search takes under 50 ms. The Gemini call (1 to 3 seconds) is what you actually wait for.
 
-**Alternatives I didn't pick:**
-- **`sqlite-vec`:** a native extension. It needs a native build, which is the kind of problem that already ruled out `better-sqlite3` on Windows.
-- **pgvector:** adds a database server to run.
-- **Chroma or Pinecone:** another service, plus keeping two stores in sync.
-- **LangChain's `MemoryVectorStore`:** loses everything on restart.
+**What I didn't use, and why:**
+- **`sqlite-vec`** needs to be compiled, which caused trouble on Windows before.
+- **pgvector** needs a Postgres server.
+- **Chroma or Pinecone** are another service to run and keep in sync.
+- **LangChain's in-memory store** loses everything when the server restarts.
 
-## What breaks at scale
+## What breaks as it grows
 
-Roughly in the order they'd show up:
+Roughly in the order you'd hit them:
 
-1. **Search time grows linearly.** Every query reads and scores every chunk. Past roughly 20–50k chunks, the search itself takes hundreds of milliseconds. It also blocks Node's event loop while it runs, so other requests wait.
-2. **Ingestion happens inside the request.** A long page means a large embedding batch, and the user waits for the download plus the embedding. Gemini rate limits (especially on the free tier) turn into 502s on save instead of a retry later. Bulk imports aren't possible.
-3. **Rate limits and outages.** Each save and each question calls Gemini. There's no request queue, no backoff across requests (only per call) and no fallback provider. During testing, the bigger Flash models were returning 503 "high demand", which is why the default chat model is `flash-lite`.
-4. **Changing the embedding model.** Chunks don't record which model or dimension created them. Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` quietly makes old vectors meaningless, and everything has to be re-embedded.
-5. **SQLite allows one writer at a time.** Fine for one user. Many users saving at once would queue behind each other (WAL mode helps reads, not writes).
-6. **Retrieval quality on large, mixed collections.** Pure vector search misses exact terms like error codes, names or IDs. And with no minimum similarity, the top 5 chunks are always sent to the model, even when none of them is relevant. The prompt tells the model to say "not found" in that case, but that relies on the model following the instruction.
-7. **Fetched pages are untrusted text.** A page can contain instructions aimed at the model (prompt injection). The system prompt treats the context as data, but that isn't a guarantee.
+1. **Search gets slower with every chunk.** Every question checks every chunk. Past 20,000 to 50,000 chunks it takes hundreds of milliseconds, and the server can't handle other requests while it runs.
+2. **Saving happens while you wait.** A long page means a big Gemini request. If Gemini is rate-limited, the save fails instead of being retried later. You can't import lots of items at once.
+3. **Gemini limits and outages.** Every save and every question calls Gemini. There's no queue and no backup provider. During testing, the bigger Gemini models often replied "too busy", which is why the default is `flash-lite`.
+4. **Changing the embedding model.** The database doesn't record which model made each chunk's numbers. If you change the model, old numbers stop making sense and everything has to be saved again.
+5. **SQLite takes one write at a time.** Fine for one person. Many people saving at once would have to wait in line.
+6. **Search misses exact words.** Number-based search can miss exact things like error codes, names or IDs. And the 5 closest chunks are always sent to Gemini, even if none of them fits. The prompt tells Gemini to say "not found" then, but that depends on Gemini following it.
+7. **Web pages can contain tricks.** A page could include text meant to give Gemini instructions. The prompt treats saved text as data, but that's not a guarantee.
 
-## Production changes
+## What I'd change for real users
 
-What I'd change first if this had real users:
+- **A proper search index.** Postgres with pgvector (which also fixes the one-write-at-a-time limit), or `sqlite-vec` if it stays single-user. Until then, loading the numbers into memory once at startup would avoid reading them from disk on every question.
+- **Mix in keyword search.** Combine normal text search with number-based search so exact words are found. Skip chunks below a minimum score.
+- **Save in the background.** Reply right away with "processing", and let a separate worker download, split and embed, with retries.
+- **Record which model made each chunk's numbers**, so old ones can be rebuilt after a model change.
+- **Handle Gemini problems better.** A paid plan, limits per user, caching repeated questions, a backup model, and streaming answers as they're written.
+- **Measure answer quality.** Keep a set of questions with known answers and check them after every change, instead of guessing.
+- **Better monitoring.** Track how long each step takes, how often Gemini fails, and how much it's used.
+- **Security.**
+  - A login once there's more than one user.
+  - Close a gap where a link could pass the "no local network" check and then point somewhere else when it's actually downloaded.
+  - Flag text in saved pages that looks like instructions to the AI.
 
-- **Use a real vector index.** Either pgvector with an HNSW index (Postgres also fixes the single-writer limit), or `sqlite-vec` if staying single-user. In the meantime, keeping the vectors in memory at startup would avoid reading them from SQLite on every query.
-- **Hybrid search.** Combine SQLite FTS5 or Postgres full-text search (BM25) with vector search to catch exact terms. Add a minimum score threshold, and optionally a reranker over the top 20.
-- **Move ingestion into a background job queue.** `POST /ingest` would return `202` with the item id right away, and a worker would download, chunk and embed with retries and backoff. The UI would show "processing" until the item is ready.
-- **Record the embedding model and dimension on each chunk.** Then a re-embed job can rebuild old vectors when the model changes.
-- **Make the AI layer more resilient.** Use a paid tier, add per-user rate limiting on `/query`, cache embeddings of repeated questions, add a fallback model, and stream answers to the UI.
-- **Measure quality.** Build a small set of questions with known answers and track retrieval hit rate and whether answers are grounded, so changes to chunking or the prompt can be compared instead of guessed.
-- **Observability.** Request logs already carry a request id. I'd add metrics for latency per step (embed, search, generate), Gemini error rates and token usage, plus tracing.
-- **Security basics.**
-  - Auth once there's more than one user.
-  - Re-check the resolved IP inside the fetch's own connection. Right now the check and the fetch resolve DNS separately, which leaves a DNS-rebinding gap.
-  - Strip or flag instruction-like text in fetched pages.
+## Finding problems
 
-## Debuggability
-
-- **Structured JSON logs (pino).** Every request gets one line with `requestId`, method, path, status and duration. The id is returned in the `x-request-id` response header, so a user-reported error can be found in the logs.
-- **Every RAG query logs what was retrieved.** That's the item id, position and score of each chunk, plus which blocks the answer cited. This is the first thing to check when an answer is wrong: did search find the right chunk, or did the model ignore it?
-- **Upstream failures are logged with the original provider error** (`cause`), but the client only gets a clean message.
-- **One error shape for every endpoint:** `{ error: { code, message, details? } }`, with the status codes listed in the README.
+- **Every request is logged on one line** with an id, the method, the path, the status and how long it took. The same id is sent back in the `x-request-id` header, so a user's error can be found in the log.
+- **Every question logs what search found:** which chunks, their scores, and which ones the answer used. When an answer is wrong, check this first. Did search miss the right chunk, or did Gemini ignore it?
+- **When Gemini or a website fails, the full original error is logged**, but the user only sees a short, clear message.
+- **Every error has the same shape:** `{ error: { code, message, details? } }`. The README lists the status codes.

@@ -1,4 +1,3 @@
-// Page layout: ingest form + saved items | ask panel + answer.
 import { AskPanel } from './components/AskPanel';
 import { IngestForm } from './components/IngestForm';
 import { ItemList } from './components/ItemList';

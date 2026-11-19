@@ -1,4 +1,3 @@
-// One cited source: number, title/URL, and the chunk of text that matched.
 export const SourceSnippet = ({ source }) => (
   <li id={`source-${source.n}`} className="source">
     <div className="source-header">

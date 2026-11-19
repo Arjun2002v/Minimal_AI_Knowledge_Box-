@@ -1,53 +1,57 @@
 # Knowledge Box
 
-A small personal knowledge inbox. You save notes and web links, then ask questions about them. The answers use only what you've saved, and each claim links to the passage it came from.
+A small app for saving notes and web links, then asking questions about them.
 
-It's a basic RAG setup:
-- **Saving:** content is split into chunks, the chunks are embedded with Gemini, and the vectors are stored in SQLite.
-- **Asking:** the question is embedded, the closest chunks are found, and Gemini writes an answer from only those chunks, citing them as `[1]`, `[2]`, and so on.
+Answers come only from what you've saved. Each answer shows where it came from, with numbered links like `[1]` that jump to the matching text.
 
-The tradeoffs (chunking, vector store, what breaks at scale, production changes) are written up in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+How it works, in short:
+- When you save something, the text is cut into small pieces. Each piece is turned into a list of numbers (an "embedding") by Gemini and stored in SQLite.
+- When you ask a question, the question gets turned into numbers too. The app finds the saved pieces closest to it and asks Gemini to answer using only those pieces.
 
-## Stack
+The design choices and their downsides are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-- **Backend:**
-  - Node 22 and Express 5 in plain JavaScript (ES modules, no build step)
-  - SQLite through Node's built-in `node:sqlite`
-  - Zod for validation, pino for logs
-- **RAG:** LangChain JS
-  - `@langchain/textsplitters` splits the text into chunks
-  - `@langchain/google-genai` provides the Gemini embeddings and chat model
-  - `@langchain/core` provides the prompt template and the chain
-- **Models:**
-  - `gemini-embedding-001` for embeddings, at 768 dimensions
-  - `gemini-3.5-flash-lite` for answers
-- **Frontend:** React 19 and Vite in plain JavaScript (JSX), SWR for data fetching and caching, plain CSS
+## What it's built with
+
+- **Backend:** Node 22, Express 5, plain JavaScript. SQLite (built into Node), Zod to check requests, pino for logs.
+- **AI parts:** LangChain JS with Google Gemini.
+  - `gemini-embedding-001` turns text into numbers.
+  - `gemini-3.5-flash-lite` writes the answers.
+- **Frontend:** React 19, Vite, SWR for loading data, plain CSS.
 
 ## Running it
 
-You need **Node 22.5 or newer** and a **Gemini API key**. The free one from https://aistudio.google.com/apikey works.
+You need Node 22.5 or newer and a Gemini API key. A free key from https://aistudio.google.com/apikey is enough.
+
+Open two terminals.
+
+Terminal 1, the backend:
 
 ```bash
-# backend
 cd backend
 npm install
-cp .env.example .env      # then set GEMINI_API_KEY in .env
-npm run dev               # http://localhost:4000/api
-
-# frontend, in a second terminal
-cd frontend
-npm install
-npm run dev               # http://localhost:5173
+cp .env.example .env      # then put your key in GEMINI_API_KEY
+npm run dev               # runs on http://localhost:4000/api
 ```
 
-**Notes:**
-- **Nothing to compile.** The SQLite module is built into Node. It's still marked experimental in Node 22, so the npm scripts pass `--experimental-sqlite`.
-- **No CORS setup.** The Vite dev server forwards `/api` to the backend, so the browser only talks to one origin.
+Terminal 2, the frontend:
 
-All settings live in `backend/.env`; see [.env.example](backend/.env.example). The ones you're most likely to change:
-- **`CHAT_MODEL`:** if the default model is overloaded, try another Gemini Flash model.
-- **`CHUNK_SIZE`, `CHUNK_OVERLAP` and `TOP_K`:** chunking and retrieval settings.
-- **`EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`:** if you change either, delete `backend/data/inbox.db` and save your items again. Vectors from different models can't be compared.
+```bash
+cd frontend
+npm install
+npm run dev               # open http://localhost:5173
+```
+
+Run these inside `backend` and `frontend`, not the project's top folder. The top folder has no `package.json`, so npm will fail there.
+
+You don't need to compile anything or set up CORS. The frontend dev server passes `/api` requests on to the backend.
+
+### Settings
+
+All settings are in `backend/.env`. See [.env.example](backend/.env.example) for the full list. The ones you might change:
+
+- `CHAT_MODEL`: try another Gemini Flash model if the default one is busy.
+- `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`: how text is split and how many pieces are used per answer.
+- `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`: if you change either one, delete `backend/data/inbox.db` and save your items again. Numbers from different models don't mix.
 
 ### Tests
 
@@ -56,24 +60,22 @@ cd backend
 npm test
 ```
 
-There are 36 tests, using Node's built-in test runner:
-- **API tests:** validation, status codes, ingestion, querying and citations.
-- **Unit tests:** the chunker, the vector helpers and the prompt helpers.
+There are 37 tests. They check the API (bad input, status codes, saving, asking, citations) and the small helpers (splitting text, vector math, the prompt).
 
-They use an in-memory database and a fake embedder, fetcher and model (`tests/helpers.js`), so they don't need the network or an API key.
+They use a temporary in-memory database and fake AI parts (`tests/helpers.js`), so they don't need internet or an API key.
 
 ## API
 
-All routes are under `/api`.
+Every route starts with `/api`.
 
-| Method | Path | Body | Response |
+| Method | Path | Send | Get back |
 |---|---|---|---|
-| `POST` | `/ingest` | `{ "type": "note", "content": "...", "title"?: "..." }` or `{ "type": "url", "url": "https://..." }` | `201` `{ item }` (includes `chunkCount`) |
-| `GET` | `/items` | | `200` `{ items }`, newest first, each with a 200-character `preview` |
-| `POST` | `/query` | `{ "question": "...", "topK"?: 1-20 }` | `200` `{ answer, sources }` |
-| `GET` | `/health` | | `200` `{ status: "ok" }` |
+| `POST` | `/ingest` | `{ "type": "note", "content": "...", "title"?: "..." }` or `{ "type": "url", "url": "https://..." }` | `201` with the saved `item` |
+| `GET` | `/items` | nothing | `200` with your `items`, newest first, each with a short `preview` |
+| `POST` | `/query` | `{ "question": "...", "topK"?: 1-20 }` | `200` with the `answer` and its `sources` |
+| `GET` | `/health` | nothing | `200` `{ "status": "ok" }` |
 
-Example `/query` response:
+Example answer from `/query`:
 
 ```json
 {
@@ -92,78 +94,75 @@ Example `/query` response:
 }
 ```
 
-What the fields mean:
-- **`sources`** lists only the chunks the answer actually cites.
-- **`n`** matches the `[n]` marker in the answer.
-- **`score`** is the cosine similarity between the question and that chunk.
+- `sources` only lists pieces the answer actually used.
+- `n` is the number shown in the answer, like `[1]`.
+- `score` is how close that piece was to the question, from 0 to 1.
 
-If nothing relevant is saved, the answer says so and `sources` is empty.
+If nothing you saved fits the question, the answer says so and `sources` is empty.
 
 ### Errors
 
-Every error has the same shape:
+Errors always look like this:
 
 ```json
 { "error": { "code": "VALIDATION_ERROR", "message": "Invalid request body", "details": [{ "field": "url", "message": "Must be a valid URL" }] } }
 ```
 
-| Status | Code | When |
+| Status | Code | Meaning |
 |---|---|---|
-| 400 | `VALIDATION_ERROR`, `INVALID_JSON` | Invalid body or malformed JSON |
-| 404 | `NOT_FOUND` | Unknown route |
-| 413 | `PAYLOAD_TOO_LARGE` | Body over 256 KB |
-| 422 | `UNPROCESSABLE` | The URL was fine, but the page couldn't be used (HTTP error, not HTML, no text, over 2 MB, private address) |
-| 502 | `UPSTREAM_ERROR` | The remote site timed out or failed, or Gemini failed (rate limit, overload, bad key). The message says which. |
-| 500 | `INTERNAL_ERROR` | A bug. The details go to the log, not to the client. |
+| 400 | `VALIDATION_ERROR`, `INVALID_JSON` | What you sent is missing something or isn't valid JSON |
+| 404 | `NOT_FOUND` | No such route |
+| 413 | `PAYLOAD_TOO_LARGE` | What you sent is over 256 KB |
+| 422 | `UNPROCESSABLE` | The link is valid, but the page can't be used: it errored, isn't a web page, has no text, is over 2 MB, or points at a private address |
+| 502 | `UPSTREAM_ERROR` | The website or Gemini failed (timeout, rate limit, busy, wrong key). The message says which. |
+| 500 | `INTERNAL_ERROR` | A bug in the app. Details go to the server log only. |
 
-## How it's put together
+## Where things are
 
 ```
 backend/src
-  routes/      HTTP only: validate, call a service, send the response
-  services/    ingestion (fetch → chunk → embed → save), items, rag (embed → search → prompt → answer)
-  db/          SQLite connection, schema, and the only place with SQL (items + chunks repositories)
-  rag/         chunker, embeddings, retriever, prompt, llm (LangChain + Gemini), vector helpers
-  fetchers/    downloads a URL and extracts its readable text
-  middleware/  validation, request logging, error → JSON mapping
-  config/      reads and validates .env
+  routes/      receive requests, check them, call a service, reply
+  services/    the main steps: saving, listing, and answering questions
+  db/          the SQLite database and all SQL
+  rag/         splitting text, embeddings, search, the prompt, calling Gemini
+  fetchers/    downloads a web page and pulls out its text
+  middleware/  request checks, logging, turning errors into JSON
+  config/      reads the .env file
 
 frontend/src
-  api/         fetch wrapper; turns error responses into an ApiError
-  hooks/       useItems (useSWR), useIngest and useAsk (useSWRMutation)
-  components/  IngestForm, ItemList, AskPanel, AnswerView, SourceSnippet, ErrorBanner
+  api/         calls the backend
+  hooks/       load items, save items, ask questions
+  components/  the parts of the page
 ```
 
-`createApp()` receives everything from outside as arguments: the database, the URL fetcher, the chunker, the embedder and the answer generator. `server.js` passes in the real ones and the tests pass in fakes. Nothing else in the app knows which one it got.
+`createApp()` gets the database and all the outside services (web fetching, Gemini) passed in. The real server passes the real ones, and the tests pass fakes.
 
-On the frontend, SWR caches the items list under the `/items` key. After a save, `useSWRMutation` puts the new item at the top of that cached list itself, so there's no refetch. SWR also refetches when you come back to the tab, and it retries network and server errors but not 4xx responses.
+In the browser, the item list is cached. When you save something, it's added to the top of the list right away without reloading. The list also refreshes when you come back to the tab.
 
-## Decisions worth explaining
+## Why some things are the way they are
 
-These are the decisions not covered in ARCHITECTURE.md.
+**Gemini instead of OpenAI.** Gemini has a free tier, so anyone can run this without paying. I use it through LangChain because that lets questions and saved text be embedded in slightly different ways, which gives better search results.
 
-**Gemini through LangChain.** The brief asks for OpenAI or an equivalent. Gemini has a free tier, which is easier for a reviewer to run.
+One problem: when Gemini fails during saving, LangChain doesn't report an error. It quietly returns empty results. The app checks for this, retries twice, and then shows a clear error instead of crashing.
 
-I tried calling Gemini through its OpenAI-compatible endpoint first. I switched to LangChain's native Gemini integration because it supports separate task types for documents and questions, which improves retrieval.
+**Web pages are downloaded by the server.** The browser usually isn't allowed to read other sites, and the server needs the text anyway. To stay safe, the server:
+- gives up after 10 seconds or 2 MB
+- only accepts web pages and plain text
+- refuses links to your own computer or local network, and checks again after every redirect
 
-LangChain has one catch: when a batch embedding request fails, `embedDocuments` doesn't throw. It returns empty vectors instead. `rag/embeddings.js` checks every vector, retries twice, and then returns a clear 502. Before that check, a rate-limited save caused a confusing 500 from SQLite.
+It also strips out menus, headers, footers and scripts, and uses the main article area when a page has one.
 
-**Fetching URLs on the server.** The browser can't read most pages because of CORS, and the text has to be on the server to be embedded anyway. The fetcher has these guards:
-- a 10-second timeout and a 2 MB cap
-- only HTML or plain text is accepted
-- addresses that resolve to localhost or private networks are rejected, and this is re-checked on every redirect (redirects are followed manually)
+**Answers must show their sources.** Gemini is told to put `[1]`, `[2]` and so on after each fact. The app removes any number that doesn't point to a real source, and the page turns the rest into links.
 
-Text extraction removes scripts, nav, header, footer and similar parts, and prefers `<article>` or `<main>` when the page has one.
+**Titles count in search.** A note's title is included when it's indexed, so a note titled "Remind me" is found when you ask about your reminder, even if the word isn't in the note itself.
 
-**Answers must cite, and citations are checked.** The prompt numbers the context blocks and asks for `[n]` after every claim. The server keeps only citations that point at blocks that really exist. The UI turns them into links that jump to the source snippet.
+**Notes get a title automatically.** If you leave the title empty, the first line of the note is used.
 
-**Notes get a title automatically.** If you don't give one, the title is the first line of the note, cut at a word boundary.
+## Limits
 
-## Known limitations
-
-- **Single user.** There's no auth.
-- **Items can't be edited or deleted** from the UI or the API.
-- **Duplicates aren't detected.** Saving the same URL twice creates two items.
-- **JavaScript-heavy pages don't work.** Pages that need JavaScript to show their content come out mostly empty.
-- **Saving can be slow.** It waits for the page download and for Gemini embeddings inside the request, and the free tier's rate limits can make it fail with a 502.
-- **Don't save anything sensitive on a free key.** On Gemini's free tier, Google may use what you send to improve its products.
+- Only one user. There's no login.
+- You can't edit or delete saved items.
+- Saving the same link twice gives you two copies.
+- Pages that need JavaScript to show their content come out mostly empty.
+- Saving can be slow, and Gemini's free tier limits can make it fail.
+- Don't save private things with a free key. Google may use what you send on the free tier to improve its products.

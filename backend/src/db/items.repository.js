@@ -1,5 +1,3 @@
-// SQL access for items.
-
 const PREVIEW_LENGTH = 200;
 
 export const createItemsRepository = (db) => {
@@ -10,7 +8,6 @@ export const createItemsRepository = (db) => {
     ).run(item.id, item.type, item.title, item.url, item.content, item.createdAt);
   };
 
-  /** Newest first. Only the first few hundred characters of content are returned. */
   const list = (limit = 100) => {
     const rows = db
       .prepare(

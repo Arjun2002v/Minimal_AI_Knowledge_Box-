@@ -1,4 +1,3 @@
-
 import express from 'express';
 import { createChunksRepository } from './db/chunks.repository.js';
 import { createItemsRepository } from './db/items.repository.js';
@@ -9,7 +8,6 @@ import { apiRoutes } from './routes/index.js';
 import { createIngestionService } from './services/ingestion.service.js';
 import { createItemsService } from './services/items.service.js';
 import { createRagService } from './services/rag.service.js';
-
 
 export const createApp = ({ db, fetchUrl, chunkText, embedder, generateAnswer, topK }) => {
   const itemsRepo = createItemsRepository(db);

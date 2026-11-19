@@ -1,4 +1,3 @@
-// Question input + the answer for the last question.
 import { useState } from 'react';
 import { useAsk } from '../hooks/useAsk';
 import { AnswerView } from './AnswerView';

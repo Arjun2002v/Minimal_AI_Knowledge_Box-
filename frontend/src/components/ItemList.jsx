@@ -1,4 +1,3 @@
-// List of saved items with type, timestamp, preview.
 import { useItems } from '../hooks/useItems';
 import { ErrorBanner } from './ErrorBanner';
 

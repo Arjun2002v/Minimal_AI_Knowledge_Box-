@@ -1,5 +1,3 @@
-// Orchestrates ingest: fetch (if URL) -> chunk -> embed -> store item + chunks.
-// Embedding happens before anything is written, so a failed AI call leaves no half-saved item.
 import { randomUUID } from 'node:crypto';
 import { inTransaction } from '../db/client.js';
 
@@ -7,7 +5,6 @@ const TITLE_FROM_NOTE_LENGTH = 80;
 
 const newItem = (fields) => ({ id: randomUUID(), createdAt: new Date().toISOString(), ...fields });
 
-/** First line of the note, cut at a word boundary. */
 const titleFromText = (text) => {
   const firstLine = text.split('\n', 1)[0].trim();
   if (firstLine.length <= TITLE_FROM_NOTE_LENGTH) return firstLine;
@@ -26,16 +23,6 @@ const toSummary = (item, chunkCount) => ({
   chunkCount,
 });
 
-/**
- * @param {{
- *   db: import('node:sqlite').DatabaseSync,
- *   itemsRepo: ReturnType<typeof import('../db/items.repository.js').createItemsRepository>,
- *   chunksRepo: ReturnType<typeof import('../db/chunks.repository.js').createChunksRepository>,
- *   fetchUrl: (url: string) => Promise<{ url: string, title: string, text: string }>,
- *   chunkText: (text: string) => Promise<string[]>,
- *   embedder: { embedDocuments: (texts: string[]) => Promise<Float32Array[]> },
- * }} deps
- */
 export const createIngestionService = ({ db, itemsRepo, chunksRepo, fetchUrl, chunkText, embedder }) => {
   const fromUrl = async (url) => {
     const page = await fetchUrl(url);
@@ -49,8 +36,7 @@ export const createIngestionService = ({ db, itemsRepo, chunksRepo, fetchUrl, ch
     const item = input.type === 'url' ? await fromUrl(input.url) : fromNote(input.content, input.title);
 
     const texts = await chunkText(item.content);
-    // Embed the title with each chunk so questions that match the title ("my reminder")
-    // find the item even when the body alone doesn't. The stored chunk text stays as-is.
+    // Include the title so a note can be found by its title, not just its body.
     const embeddings = await embedder.embedDocuments(texts.map((text) => `${item.title}\n\n${text}`));
     if (embeddings.length !== texts.length) {
       throw new Error(`Embedder returned ${embeddings.length} vectors for ${texts.length} chunks`);

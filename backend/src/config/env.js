@@ -1,4 +1,3 @@
-// Reads and validates environment variables (API keys, model names, chunk sizes, DB path).
 import 'dotenv/config';
 import { z } from 'zod';
 

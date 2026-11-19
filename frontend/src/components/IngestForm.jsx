@@ -1,10 +1,9 @@
-// Note / URL toggle with input and submit.
 import { useState } from 'react';
 import { useIngest } from '../hooks/useIngest';
 import { ErrorBanner } from './ErrorBanner';
 
 export const IngestForm = () => {
-  const [mode, setMode] = useState('note'); // 'note' | 'url'
+  const [mode, setMode] = useState('note');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [url, setUrl] = useState('');

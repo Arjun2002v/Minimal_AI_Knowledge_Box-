@@ -1,4 +1,3 @@
-// POST /ingest - validates body, delegates to ingestion service, returns 201 + created item.
 import { Router } from 'express';
 import { validateBody } from '../middleware/validate.js';
 import { ingestSchema } from '../schemas/ingest.schema.js';

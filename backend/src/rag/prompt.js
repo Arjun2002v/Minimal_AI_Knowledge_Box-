@@ -1,5 +1,3 @@
-// Builds the grounded prompt with numbered context blocks for citations,
-// and maps the [n] markers in the answer back to those blocks.
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 
 export const NOT_FOUND_ANSWER = "I couldn't find anything about that in your saved items.";
@@ -17,13 +15,11 @@ Rules:
   ['human', 'Context:\n\n{context}\n\nQuestion: {question}'],
 ]);
 
-/** Turns retrieved chunks into "[1] Title (url)\ntext" blocks. Block n is chunks[n - 1]. */
 export const formatContext = (chunks) =>
   chunks
     .map((c, i) => `[${i + 1}] ${c.title}${c.url ? ` (${c.url})` : ''}\n${c.text}`)
     .join('\n\n');
 
-/** Block numbers cited in the answer ("[2]", "[1, 3]"), unique, ascending, only ones that exist. */
 export const citedBlockNumbers = (answer, blockCount) => {
   const numbers = new Set();
   for (const match of answer.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {

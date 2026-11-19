@@ -1,4 +1,3 @@
-// Request schema for /ingest: { type: 'note', content, title? } | { type: 'url', url }.
 import { z } from 'zod';
 
 const MAX_NOTE_LENGTH = 100_000;

@@ -1,4 +1,3 @@
-// Shared error display. Shows field-level messages when the API returns them.
 import { ApiError } from '../api/client';
 
 export const ErrorBanner = ({ error, onDismiss }) => {

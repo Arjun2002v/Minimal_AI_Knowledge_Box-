@@ -1,17 +1,12 @@
-// Fetches a URL server-side (timeout, size limit, content-type check) and extracts readable text.
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import * as cheerio from 'cheerio';
 import { UnprocessableError, UpstreamError } from '../lib/errors.js';
 
 const TIMEOUT_MS = 10_000;
-const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 
-/**
- * @param {string} inputUrl
- * @returns {Promise<{ url: string, title: string, text: string }>} url is the final URL after redirects
- */
 export const fetchUrl = async (inputUrl) => {
   const { response, finalUrl } = await fetchFollowingRedirects(inputUrl);
 
@@ -34,7 +29,6 @@ export const fetchUrl = async (inputUrl) => {
   return { url: finalUrl, title: page.title, text };
 };
 
-/** Follows redirects by hand so every hop gets the private-address check. */
 const fetchFollowingRedirects = async (startUrl) => {
   let url = startUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -62,7 +56,7 @@ const fetchFollowingRedirects = async (startUrl) => {
   throw new UnprocessableError('Too many redirects');
 };
 
-/** Blocks localhost / private networks so the server can't be used to probe internal services. */
+// Don't let saved URLs point at localhost or the local network.
 const assertPublicHost = async (url) => {
   const { hostname } = new URL(url);
   const host = hostname.replace(/^\[|\]$/g, '');
@@ -125,11 +119,9 @@ const extractFromHtml = (html, url) => {
 
   $('script, style, noscript, template, svg, iframe, nav, header, footer, aside, form').remove();
 
-  // Keep paragraph structure: block elements end with a blank line.
   $('br').replaceWith('\n');
   $('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, tr, div, section, article').append('\n\n');
 
-  // Prefer the main content area when the page marks one.
   let main = $('body');
   if ($('article').first().text().trim()) main = $('article').first();
   else if ($('main').first().text().trim()) main = $('main').first();

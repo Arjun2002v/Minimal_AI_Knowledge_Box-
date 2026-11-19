@@ -1,4 +1,3 @@
-// Unit tests for chunking edge cases (empty, short, long, no punctuation) and the RAG helpers.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createChunker } from '../src/rag/chunker.js';

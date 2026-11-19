@@ -1,4 +1,3 @@
-// Answer generation: prompt -> Gemini chat model -> plain string, as a LangChain chain.
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { toUpstreamError } from './ai-errors.js';
@@ -6,10 +5,6 @@ import { answerPrompt } from './prompt.js';
 
 const TIMEOUT_MS = 45_000;
 
-/**
- * @param {{ apiKey: string, model: string }} options
- * @returns {(input: { question: string, context: string }) => Promise<string>}
- */
 export const createAnswerGenerator = ({ apiKey, model }) => {
   const chatModel = new ChatGoogleGenerativeAI({ apiKey, model, temperature: 0.2, maxRetries: 2 });
   const chain = answerPrompt.pipe(chatModel).pipe(new StringOutputParser());

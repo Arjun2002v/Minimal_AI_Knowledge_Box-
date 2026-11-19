@@ -1,4 +1,3 @@
-// Test doubles: build the real app with an in-memory DB and fake network / AI pieces.
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db/client.js';
 import { UnprocessableError } from '../src/lib/errors.js';
@@ -7,7 +6,6 @@ import { normalize } from '../src/rag/vectors.js';
 
 const DIMS = 64;
 
-/** Deterministic bag-of-words "embedding": texts sharing words get similar vectors. */
 export const fakeEmbed = (text) => {
   const v = new Array(DIMS).fill(0);
   for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
@@ -23,10 +21,6 @@ export const fakeFetch = async (url) => {
   return { url, title: 'Example article', text: 'Readable text from the page.' };
 };
 
-/**
- * @param {{ generateAnswer?: Function, embedder?: object }} overrides
- * @returns {{ app: import('express').Express, calls: { answer: Array<{ question: string, context: string }> } }}
- */
 export const createTestApp = (overrides = {}) => {
   const calls = { answer: [] };
   const app = createApp({
