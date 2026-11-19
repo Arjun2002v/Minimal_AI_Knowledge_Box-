@@ -1,6 +1,4 @@
-// Builds the Express app: middleware, routes, error handler.
-// No listen() here, and every outside dependency (DB, URL fetcher, AI) is passed in,
-// so tests can build an app with an in-memory DB and fakes.
+
 import express from 'express';
 import { createChunksRepository } from './db/chunks.repository.js';
 import { createItemsRepository } from './db/items.repository.js';

@@ -49,7 +49,9 @@ export const createIngestionService = ({ db, itemsRepo, chunksRepo, fetchUrl, ch
     const item = input.type === 'url' ? await fromUrl(input.url) : fromNote(input.content, input.title);
 
     const texts = await chunkText(item.content);
-    const embeddings = await embedder.embedDocuments(texts);
+    // Embed the title with each chunk so questions that match the title ("my reminder")
+    // find the item even when the body alone doesn't. The stored chunk text stays as-is.
+    const embeddings = await embedder.embedDocuments(texts.map((text) => `${item.title}\n\n${text}`));
     if (embeddings.length !== texts.length) {
       throw new Error(`Embedder returned ${embeddings.length} vectors for ${texts.length} chunks`);
     }

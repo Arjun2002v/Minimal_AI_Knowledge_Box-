@@ -128,6 +128,13 @@ describe('POST /api/query', () => {
     assert.match(calls.answer[0].context, /^\[1\] Postgres\n/);
   });
 
+  it('finds a note by words that appear only in its title', async () => {
+    await seed();
+    await request(app).post('/api/ingest').send({ type: 'note', title: 'Reminder', content: 'To confess' });
+    await request(app).post('/api/query').send({ question: 'reminder', topK: 1 });
+    assert.match(calls.answer[0].context, /^\[1\] Reminder\nTo confess$/);
+  });
+
   it('respects topK', async () => {
     await seed();
     await request(app).post('/api/query').send({ question: 'postgres', topK: 1 });
